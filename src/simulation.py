@@ -223,55 +223,73 @@ def run_one(sim_type, noise, seed=0, window_points=500):
     params = dict(beta0=beta0, beta1=beta1, sigma1=sigma1, sigma2=sigma2)
     return (t2, S2, I2), w, idx, params
 
-def plot_one_each(sim_type="transcritical", seed0=0, window_points=500):
-    """
-    Uses your existing run_one() to run and plot:
-      - white noise
-      - env noise
-      - demo noise
-      - deterministic (noise="none")
-    for ONE simulation each.
-    Plots I(t) after burn-in and marks the R0=1 crossing index if available.
-    """
+def demo_plot(window_points=500, upper_q=99.5):
+    fig, axes = plt.subplots(3, 2, figsize=(14, 9), sharex=False)
+    noises = ["white", "env", "demo"]
+    EPS_PLOT = 1e-8
 
-    noises = ["white", "env", "demo", "none"]
+    for r, noise in enumerate(noises):
+        # -------------------------
+        # transcritical
+        # -------------------------
+        (t, S, I), w, idx, p = run_one("transcritical", noise, seed=10+r, window_points=window_points)
+        ax = axes[r, 0]
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 8), sharex=True)
-    axes = axes.ravel()
-
-    for i, noise in enumerate(noises):
-        (t2, S2, I2), w, idx, params = run_one(
-            sim_type=sim_type,
-            noise=noise,
-            seed=seed0 + i,
-            window_points=window_points
-        )
-
-        ax = axes[i]
-
-        # log scale is usually helpful for env/demo because I can get very small
         if noise in ["env", "demo"]:
-            I_plot = np.maximum(I2, 1e-8)
-            ax.plot(t2, I_plot, label="I(t)")
+            I_plot = np.maximum(I, EPS_PLOT)
+            ax.plot(t, I_plot, label="I(t)")
             ax.set_yscale("log")
+
+            y_lo = np.percentile(I_plot, 1)      # or 0.5
+            y_hi = np.percentile(I_plot, upper_q)  # e.g. 99.5
+
+            y_lo = max(y_lo, EPS_PLOT)
+            y_hi = max(y_hi, y_lo * 10)          # ensure at least 1 decade visible
+
+            ax.set_ylim(y_lo, y_hi)
+
+            # (optional) show true max in title for debugging
+            ax.set_title(f"{noise} — transcritical (max={np.max(I_plot):.2e})")
         else:
-            ax.plot(t2, I2, label="I(t)")
+            ax.plot(t, I, label="I(t)")
+            ax.set_title(f"{noise} — transcritical")
 
-        # mark the threshold time (R0=1) if present
         if idx is not None:
-            ax.axvline(t2[idx], linestyle="--", label="R0=1")
+            ax.axvline(t[idx], linestyle="--", label="threshold (R0=1)")
+            ax.axvspan(t[max(0, idx-window_points+1)], t[idx], alpha=0.2, label="window")
 
-        ax.set_title(f"{noise} | {sim_type}\n(beta0={params['beta0']:.4f}, beta1={params['beta1']:.6f})")
-        ax.set_ylabel("I(t)")
+        ax.set_ylabel("Infected I")
         ax.legend(fontsize=8)
 
-    for ax in axes[-2:]:
-        ax.set_xlabel("time (after burn-in)")
+        # -------------------------
+        # null
+        # -------------------------
+        (t, S, I), w, idx, p = run_one("null", noise, seed=20+r, window_points=window_points)
+        ax = axes[r, 1]
 
+        if noise in ["env", "demo"]:
+            I_plot = np.maximum(I, EPS_PLOT)
+            ax.plot(t, I_plot, label="I(t)")
+            ax.set_yscale("log")
+
+            y_lo = np.percentile(I_plot, 1)      # or 0.5
+            y_hi = np.percentile(I_plot, upper_q)  # e.g. 99.5
+
+            y_lo = max(y_lo, EPS_PLOT)
+            y_hi = max(y_hi, y_lo * 10)          # ensure at least 1 decade visible
+
+            ax.set_ylim(y_lo, y_hi)
+
+            ax.set_title(f"{noise} — null (max={np.max(I_plot):.2e})")
+        else:
+            ax.plot(t, I, label="I(t)")
+            ax.set_title(f"{noise} — null")
+
+        ax.axvspan(t[-window_points], t[-1], alpha=0.2, label="window")
+        ax.legend(fontsize=8)
+
+    axes[-1, 0].set_xlabel("time (after burn-in)")
+    axes[-1, 1].set_xlabel("time (after burn-in)")
     plt.tight_layout()
     plt.show()
 
-
-# Example:
-# plot_one_each(sim_type="transcritical", seed0=0, window_points=500)
-# plot_one_each(sim_type="null", seed0=100, window_points=500)
