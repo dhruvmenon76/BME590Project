@@ -123,7 +123,7 @@ def demo_feature_distributions(
 
     return results
 
-    import numpy as np
+  
 
 def _lag1_autocorr(x: np.ndarray) -> float:
     """Lag-1 autocorrelation; returns 0.0 if undefined (constant / too short)."""
@@ -160,7 +160,7 @@ def _skew_kurt(x: np.ndarray) -> tuple[float, float]:
         kurt = 0.0
     return skew, kurt
 
-import numpy as np
+
 import pandas as pd
 
 def _lag1_autocorr(x: np.ndarray) -> float:
