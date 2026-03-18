@@ -189,10 +189,50 @@ def _skew_kurt(x: np.ndarray):
     kurt = m4 / (s**4)
     return float(skew), float(kurt)
 
+def _autocorr_lag(x: np.ndarray, lag: int) -> float:
+    """Autocorrelation at arbitrary lag; returns 0.0 if undefined."""
+    x = np.asarray(x, dtype=float)
+    if x.size <= lag + 1 or lag < 1:
+        return 0.0
+
+    x0 = x[:-lag] - np.mean(x[:-lag])
+    x1 = x[lag:] - np.mean(x[lag:])
+
+    denom = np.std(x0) * np.std(x1)
+    if denom == 0 or not np.isfinite(denom):
+        return 0.0
+
+    return float(np.mean(x0 * x1) / denom)
+
+
+def _slope(x: np.ndarray) -> float:
+    """Linear trend slope of the series."""
+    x = np.asarray(x, dtype=float)
+    if x.size < 2:
+        return 0.0
+
+    t = np.arange(x.size, dtype=float)
+    return float(np.polyfit(t, x, 1)[0])
+
+
+def _mad(x: np.ndarray) -> float:
+    """Median absolute deviation."""
+    x = np.asarray(x, dtype=float)
+    if x.size == 0:
+        return 0.0
+
+    med = np.median(x)
+    return float(np.median(np.abs(x - med)))
+
 def build_ews_dataframe(noise: str, n: int, window_points: int, base_seed: int = 0):
     """
     Returns a pandas DataFrame with columns:
-        ['variance', 'ac1', 'cv', 'skewness', 'kurtosis', 'label', 'noise']
+    [
+        'variance', 'ac1', 'cv', 'skewness', 'kurtosis',
+        'slope', 'mean_abs_change', 'diff_var', 'mad', 'iqr',
+        'ac2', 'ac3',
+        'label', 'noise'
+    ]
 
     label: 1 = transcritical, 0 = null
     """
@@ -203,9 +243,10 @@ def build_ews_dataframe(noise: str, n: int, window_points: int, base_seed: int =
     rows = []
 
     def compute_features(window):
-        # log1p is numerically stable and avoids log(0) issues
+        # Transform the raw window
         x = np.log1p(np.asarray(window, dtype=float))
 
+        # ----- Original features -----
         var = float(np.var(x, ddof=1)) if x.size >= 2 else 0.0
         ac1 = _lag1_autocorr(x)
 
@@ -215,7 +256,40 @@ def build_ews_dataframe(noise: str, n: int, window_points: int, base_seed: int =
 
         skew, kurt = _skew_kurt(x)
 
-        return var, ac1, cv, skew, kurt
+        # ----- New trend / change features -----
+        slope = _slope(x)
+
+        dx = np.diff(x)
+        mean_abs_change = float(np.mean(np.abs(dx))) if dx.size > 0 else 0.0
+        diff_var = float(np.var(dx, ddof=1)) if dx.size >= 2 else 0.0
+
+        # ----- New robust spread features -----
+        mad = _mad(x)
+
+        if x.size > 0:
+            q25, q75 = np.percentile(x, [25, 75])
+            iqr = float(q75 - q25)
+        else:
+            iqr = 0.0
+
+        # ----- New multi-lag dependence features -----
+        ac2 = _autocorr_lag(x, lag=2)
+        ac3 = _autocorr_lag(x, lag=3)
+
+        return {
+            "variance": var,
+            "ac1": ac1,
+            "cv": cv,
+            "skewness": skew,
+            "kurtosis": kurt,
+            "slope": slope,
+            "mean_abs_change": mean_abs_change,
+            "diff_var": diff_var,
+            "mad": mad,
+            "iqr": iqr,
+            "ac2": ac2,
+            "ac3": ac3,
+        }
 
     # -------------------------
     # Transcritical
@@ -226,17 +300,10 @@ def build_ews_dataframe(noise: str, n: int, window_points: int, base_seed: int =
             "transcritical", noise, seed=seed, window_points=window_points
         )
 
-        var, ac1, cv, skew, kurt = compute_features(w)
-
-        rows.append({
-            "variance": var,
-            "ac1": ac1,
-            "cv": cv,
-            "skewness": skew,
-            "kurtosis": kurt,
-            "label": 1,
-            "noise": noise
-        })
+        features = compute_features(w)
+        features["label"] = 1
+        features["noise"] = noise
+        rows.append(features)
 
     # -------------------------
     # Null
@@ -247,18 +314,10 @@ def build_ews_dataframe(noise: str, n: int, window_points: int, base_seed: int =
             "null", noise, seed=seed, window_points=window_points
         )
 
-        var, ac1, cv, skew, kurt = compute_features(w)
-
-        rows.append({
-            "variance": var,
-            "ac1": ac1,
-            "cv": cv,
-            "skewness": skew,
-            "kurtosis": kurt,
-            "label": 0,
-            "noise": noise
-        })
+        features = compute_features(w)
+        features["label"] = 0
+        features["noise"] = noise
+        rows.append(features)
 
     df = pd.DataFrame(rows)
-
     return df
